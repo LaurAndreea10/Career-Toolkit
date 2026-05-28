@@ -1,0 +1,491 @@
+import React, { useState, useRef, useEffect } from "react";
+
+// ============================================================
+// CV TAILOR — AI CV Adapter for a Job Description
+// Career Toolkit suite. Same architecture (dual-mode cost-zero,
+// bilingual RO/EN, persistent history, pdf.js). Accent: lime.
+// Outputs: full rewritten CV + a diff of changes.
+// Downloads: .md (simple) and .docx (in-browser via JSZip, no server).
+// ============================================================
+
+const API_HOST = "https://api.anthropic.com/v1/messages";
+const inClaudeAI = typeof window !== "undefined" && /claude\.ai|anthropic/.test(window.location?.hostname || "");
+
+const T = {
+  ro: {
+    brand: "CV TAILOR", tagline: "Adaptează-ți CV-ul pentru orice job, cu AI",
+    intro: "Lipește CV-ul tău și anunțul de job. Primești CV-ul rescris și adaptat acelui rol — plus exact ce s-a schimbat.",
+    cvTab: "CV", jobTab: "Anunț job",
+    cvPlaceholder: "Lipește aici CV-ul tău (sau încarcă PDF mai jos)…",
+    jobPlaceholder: "Lipește aici descrierea jobului…",
+    upload: "Încarcă PDF",
+    focusLabel: "Accent", focuses: { balanced: "Echilibrat", keywords: "Cuvinte-cheie ATS", impact: "Impact & cifre", concise: "Concis" },
+    generate: "Adaptează CV-ul", generating: "Se adaptează…",
+    steps: ["Se citește CV-ul…", "Se analizează jobul…", "Se rescriu secțiunile…", "Se aliniază cuvintele-cheie…"],
+    tabCv: "CV adaptat", tabDiff: "Ce s-a schimbat",
+    copy: "Copiază", copied: "Copiat!",
+    dlMd: "Descarcă .md", dlDocx: "Descarcă .docx",
+    summary: "Rezumatul modificărilor", added: "Adăugat", changed: "Modificat", before: "Înainte", after: "După",
+    kwAligned: "Cuvinte-cheie aliniate",
+    reset: "Începe din nou", noInput: "Adaugă CV-ul și anunțul de job.", tryDemo: "Încearcă cu date demo",
+    history: "Istoric", historyEmpty: "Nimic salvat încă.", open: "Deschide", del: "Șterge", clearAll: "Șterge tot",
+    savedNote: "Salvat automat pe acest dispozitiv", poweredLive: "Generare live prin Claude", poweredLocal: "Motor local · fără cost",
+    errorTitle: "Ceva n-a mers", errorBody: "Încearcă din nou.",
+    docxNote: "Documentul .docx se generează în browser, fără cost.",
+  },
+  en: {
+    brand: "CV TAILOR", tagline: "Adapt your CV to any job, with AI",
+    intro: "Paste your CV and the job post. Get your CV rewritten and tailored to that role — plus exactly what changed.",
+    cvTab: "CV", jobTab: "Job post",
+    cvPlaceholder: "Paste your CV here (or upload a PDF below)…",
+    jobPlaceholder: "Paste the job description here…",
+    upload: "Upload PDF",
+    focusLabel: "Focus", focuses: { balanced: "Balanced", keywords: "ATS keywords", impact: "Impact & numbers", concise: "Concise" },
+    generate: "Tailor the CV", generating: "Tailoring…",
+    steps: ["Reading the CV…", "Analyzing the job…", "Rewriting sections…", "Aligning keywords…"],
+    tabCv: "Tailored CV", tabDiff: "What changed",
+    copy: "Copy", copied: "Copied!",
+    dlMd: "Download .md", dlDocx: "Download .docx",
+    summary: "Summary of changes", added: "Added", changed: "Changed", before: "Before", after: "After",
+    kwAligned: "Aligned keywords",
+    reset: "Start over", noInput: "Add your CV and the job post.", tryDemo: "Try with demo data",
+    history: "History", historyEmpty: "Nothing saved yet.", open: "Open", del: "Delete", clearAll: "Clear all",
+    savedNote: "Auto-saved on this device", poweredLive: "Live generation via Claude", poweredLocal: "Local engine · no cost",
+    errorTitle: "Something went wrong", errorBody: "Try again.",
+    docxNote: "The .docx file is generated in your browser, at no cost.",
+  },
+};
+
+const DEMO_CV =
+  "Laura Andreea — Front-End Developer. Self-taught, background in CRM & digital marketing. Built 60+ bilingual web apps on GitHub Pages: ARCADE-OPS (gamified learning app, 8800+ lines), ClientOps Suite (React+Vite+Tailwind SaaS dashboard), Alpis Fusion CRM (health scoring, segment builder, CSV import). Skills: React, Vite, Tailwind, Recharts, Git, REST APIs, SEO, RO/EN delivery. Certifications: Google, freeCodeCamp, Anthropic, LinkedIn Learning.";
+const DEMO_JOB =
+  "Hiring a React Developer to build dashboards and data visualizations. You'll own reusable UI components, work with REST APIs, and ship in 2-week sprints. Required: React, TypeScript, charting libraries, Git, strong attention to detail. Nice to have: SaaS experience, bilingual.";
+
+// ---- shared helpers -----------------------------------------
+
+function fileToBase64(file) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = () => rej(new Error("read failed")); r.readAsDataURL(file); });
+}
+const PDFJS_VER = "3.11.174";
+let _pdfjsPromise = null;
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (_pdfjsPromise) return _pdfjsPromise;
+  _pdfjsPromise = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VER}/pdf.min.js`;
+    s.onload = () => { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VER}/pdf.worker.min.js`; res(window.pdfjsLib); } catch (e) { rej(e); } };
+    s.onerror = () => rej(new Error("pdf.js failed"));
+    document.head.appendChild(s);
+  });
+  return _pdfjsPromise;
+}
+async function extractPdfText(file) {
+  const lib = await loadPdfJs(); const buf = await file.arrayBuffer(); const pdf = await lib.getDocument({ data: buf }).promise;
+  let out = ""; const max = Math.min(pdf.numPages, 6);
+  for (let p = 1; p <= max; p++) { const page = await pdf.getPage(p); const tc = await page.getTextContent(); out += tc.items.map((it) => it.str).join(" ") + "\n"; }
+  return out.trim();
+}
+
+// JSZip on demand (for .docx) — in-browser, no server, no cost.
+let _jszipPromise = null;
+function loadJSZip() {
+  if (window.JSZip) return Promise.resolve(window.JSZip);
+  if (_jszipPromise) return _jszipPromise;
+  _jszipPromise = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+    s.onload = () => res(window.JSZip);
+    s.onerror = () => rej(new Error("JSZip failed"));
+    document.head.appendChild(s);
+  });
+  return _jszipPromise;
+}
+
+const HKEY = "cvtailor:history";
+let _mem = [];
+const store = {
+  async load() {
+    try { if (window.storage?.get) { const r = await window.storage.get(HKEY); return r?.value ? JSON.parse(r.value) : []; } } catch (e) {}
+    try { if (typeof localStorage !== "undefined") { const raw = localStorage.getItem(HKEY); return raw ? JSON.parse(raw) : []; } } catch (e) {}
+    return [..._mem];
+  },
+  async save(list) {
+    const j = JSON.stringify(list); _mem = list;
+    try { if (window.storage?.set) { await window.storage.set(HKEY, j); return; } } catch (e) {}
+    try { if (typeof localStorage !== "undefined") localStorage.setItem(HKEY, j); } catch (e) {}
+  },
+};
+
+async function callClaude(content, maxTokens = 2000) {
+  const resp = await fetch(API_HOST, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: maxTokens, messages: [{ role: "user", content }] }) });
+  const data = await resp.json();
+  const raw = data.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").replace(/```json|```/g, "").trim();
+  return JSON.parse(raw);
+}
+
+// ---- local tailoring engine (no API) ------------------------
+
+function extractKeywords(jd) {
+  const stop = new Set("the a an and or for with to of in on at is are be we you our your role job experience years team work will must should have has able strong good plus și sau pentru cu de la în pe este sunt vei trebuie ani echipă rol".split(/\s+/));
+  const freq = {};
+  (jd.toLowerCase().match(/[a-zăâîșț+#.]{3,}/gi) || []).forEach((w) => { const c = w.replace(/[.]+$/, ""); if (!stop.has(c) && c.length >= 3) freq[c] = (freq[c] || 0) + 1; });
+  return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([w]) => w);
+}
+
+function localTailor(cv, job, focus, lang) {
+  const L = lang === "ro";
+  const kws = extractKeywords(job);
+  const cvLow = cv.toLowerCase();
+  const missing = kws.filter((k) => !cvLow.includes(k));
+  const present = kws.filter((k) => cvLow.includes(k));
+  const role = (job.match(/(developer|engineer|designer|manager|analyst|specialist)/i) || [, "Developer"])[1];
+  const name = (cv.match(/^([A-ZĂÂÎȘȚ][a-zăâîșț]+ [A-ZĂÂÎȘȚ][a-zăâîșț]+)/) || [, L ? "Numele Tău" : "Your Name"])[1];
+
+  const summary = L
+    ? `${role} cu experiență relevantă, specializat/ă în ${present.slice(0, 3).join(", ") || "tehnologii moderne"}. Adaptat/ă pentru rolul țintă, cu accent pe ${focus === "impact" ? "rezultate măsurabile" : focus === "keywords" ? "competențele cerute" : "potrivirea cu cerințele"}.`
+    : `${role} with relevant experience, specializing in ${present.slice(0, 3).join(", ") || "modern technologies"}. Tailored to the target role, emphasizing ${focus === "impact" ? "measurable results" : focus === "keywords" ? "the required skills" : "fit with the requirements"}.`;
+
+  // build a tailored CV text by reordering: summary first, then original, with a skills line aligned to the job
+  const skillsLine = (L ? "Competențe relevante: " : "Relevant skills: ") + [...present, ...missing].slice(0, 10).join(", ");
+  const tailored = `${name}\n${role}\n\n${L ? "REZUMAT" : "SUMMARY"}\n${summary}\n\n${skillsLine}\n\n${L ? "DETALII" : "DETAILS"}\n${cv}`;
+
+  const changes = [
+    { type: "added", section: L ? "Rezumat" : "Summary", before: "", after: summary },
+    { type: "changed", section: L ? "Competențe" : "Skills", before: L ? "(listă generică)" : "(generic list)", after: skillsLine },
+  ];
+  if (missing.length) changes.push({ type: "added", section: L ? "Cuvinte-cheie" : "Keywords", before: "", after: missing.join(", ") });
+
+  return { tailored, changes, aligned: kws, summaryNote: L ? `Am aliniat ${present.length}/${kws.length} cuvinte-cheie; integrează-le pe cele lipsă unde le ai real.` : `Aligned ${present.length}/${kws.length} keywords; weave in the missing ones where you genuinely have them.` };
+}
+
+// ---- file download helpers ----------------------------------
+
+function downloadText(filename, text, mime = "text/plain") {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Minimal but valid .docx: paragraphs from plain text, built as OOXML and zipped.
+function xmlEscape(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+async function downloadDocx(filename, text) {
+  const JSZip = await loadJSZip();
+  const zip = new JSZip();
+
+  const paras = text.split("\n").map((line) => {
+    if (line.trim() === "") return `<w:p/>`;
+    // crude heading detection: ALL CAPS short lines become bold
+    const isHeading = line === line.toUpperCase() && line.trim().length > 0 && line.trim().length < 40;
+    const rpr = isHeading ? `<w:rPr><w:b/><w:sz w:val="26"/></w:rPr>` : `<w:rPr><w:sz w:val="22"/></w:rPr>`;
+    return `<w:p><w:r>${rpr}<w:t xml:space="preserve">${xmlEscape(line)}</w:t></w:r></w:p>`;
+  }).join("");
+
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>${paras}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr></w:body>
+</w:document>`;
+
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`;
+
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`;
+
+  zip.file("[Content_Types].xml", contentTypes);
+  zip.folder("_rels").file(".rels", rels);
+  zip.folder("word").file("document.xml", documentXml);
+
+  const blob = await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ---- UI -----------------------------------------------------
+
+export default function CVTailor() {
+  const [lang, setLang] = useState("ro");
+  const [view, setView] = useState("input");
+  const [cv, setCv] = useState(""); const [job, setJob] = useState("");
+  const [tab, setTab] = useState("cv");
+  const [focus, setFocus] = useState("balanced");
+  const [step, setStep] = useState(0);
+  const [result, setResult] = useState(null);
+  const [outTab, setOutTab] = useState("cv");
+  const [copied, setCopied] = useState(false);
+  const [dlBusy, setDlBusy] = useState(false);
+  const inputRef = useRef(null);
+  const [hist_, setHist_] = useState([]); const [showHist, setShowHist] = useState(false);
+  useEffect(() => { store.load().then(setHist_); }, []);
+
+  const t = T[lang]; const live = inClaudeAI;
+  const canRun = cv.trim().length > 20 && job.trim().length > 20;
+
+  async function onPdf(f) {
+    if (!f || f.type !== "application/pdf") return;
+    try { const txt = await extractPdfText(f); if (txt) { setCv(txt); setTab("cv"); } } catch (e) { console.warn(e); }
+  }
+
+  async function pushHistory(entry) { const item = { id: Date.now(), ts: new Date().toISOString(), lang, ...entry }; const next = [item, ...hist_].slice(0, 30); setHist_(next); await store.save(next); }
+  async function deleteHistory(id) { const n = hist_.filter((h) => h.id !== id); setHist_(n); await store.save(n); }
+  async function clearHistory() { setHist_([]); await store.save([]); }
+
+  async function generate() {
+    if (!canRun) return;
+    setView("loading"); setStep(0); setCopied(false); setOutTab("cv");
+    const timer = setInterval(() => setStep((s) => (s + 1) % t.steps.length), 1300);
+    try {
+      let out;
+      if (live) {
+        const langName = lang === "ro" ? "Romanian" : "English";
+        out = await callClaude([{ type: "text", text:
+          `You are a CV tailoring expert. Rewrite the CV to fit the job. Focus: ${focus}. Write in ${langName}. Keep it truthful — only rephrase/reorder/emphasize what's in the CV, never invent facts. Respond with ONLY JSON: {"tailored":"<full rewritten CV as plain text with line breaks>","changes":[{"type":"added|changed","section":"...","before":"...","after":"..."}],"aligned":["keyword",...],"summaryNote":"<1-2 sentences>"}\n\nCV:\n${cv}\n\nJOB:\n${job}` }], 2200);
+      } else { await new Promise((r) => setTimeout(r, 1300)); out = localTailor(cv, job, focus, lang); }
+      setResult(out); setView("result");
+      pushHistory({ result: out, focus, preview: (out.aligned || []).slice(0, 4).join(", ") });
+    } catch (e) { console.error(e); setView("error"); }
+    finally { clearInterval(timer); }
+  }
+
+  function copyCv() { navigator.clipboard?.writeText(result?.tailored || "").then(() => { setCopied(true); setTimeout(() => setCopied(false), 1700); }); }
+  async function doDocx() { setDlBusy(true); try { await downloadDocx("CV-adaptat.docx", result?.tailored || ""); } catch (e) { console.error(e); } finally { setDlBusy(false); } }
+  function reset() { setView("input"); setResult(null); setCv(""); setJob(""); }
+  function openHistory(item) { setResult(item.result); setOutTab("cv"); setShowHist(false); setView("result"); }
+
+  return (
+    <div className="ct-root" data-lang={lang}>
+      <style>{CSS}</style>
+      <div className="ct-grid" /><div className="ct-glow ct-glow-a" /><div className="ct-glow ct-glow-b" />
+      <header className="ct-header">
+        <div className="ct-brand"><span className="ct-logo">✂</span><div><h1>{t.brand}</h1><p>{t.tagline}</p></div></div>
+        <div className="ct-hr">
+          <span className={`ct-pill ${live ? "live" : "local"}`}>{live ? "● LIVE AI" : "● LOCAL"}</span>
+          <button className="ct-lang" onClick={() => setShowHist(true)}>⧉ {t.history}{hist_.length > 0 && <span className="ct-badge">{hist_.length}</span>}</button>
+          <button className="ct-lang" onClick={() => setLang((l) => (l === "ro" ? "en" : "ro"))}>{lang === "ro" ? "EN" : "RO"}</button>
+        </div>
+      </header>
+
+      <main className="ct-main">
+        {view === "input" && (
+          <section className="ct-fade">
+            <p className="ct-intro">{t.intro}</p>
+            <div className="ct-panel">
+              <div className="ct-tabs">
+                <button className={tab === "cv" ? "on" : ""} onClick={() => setTab("cv")}>{t.cvTab}</button>
+                <button className={tab === "job" ? "on" : ""} onClick={() => setTab("job")}>{t.jobTab}</button>
+              </div>
+              {tab === "cv" ? (
+                <>
+                  <textarea className="ct-ta" rows={8} placeholder={t.cvPlaceholder} value={cv} onChange={(e) => setCv(e.target.value)} />
+                  <input ref={inputRef} type="file" accept=".pdf" hidden onChange={(e) => onPdf(e.target.files?.[0])} />
+                  <button className="ct-upload" onClick={() => inputRef.current?.click()}>⬆ {t.upload}</button>
+                </>
+              ) : (
+                <textarea className="ct-ta" rows={8} placeholder={t.jobPlaceholder} value={job} onChange={(e) => setJob(e.target.value)} />
+              )}
+              <div style={{ marginTop: 18 }}>
+                <span className="ct-opt-lbl">{t.focusLabel}</span>
+                <div className="ct-chips">
+                  {Object.keys(t.focuses).map((k) => (
+                    <button key={k} className={`ct-chip ${focus === k ? "on" : ""}`} onClick={() => setFocus(k)}>{t.focuses[k]}</button>
+                  ))}
+                </div>
+              </div>
+              <button className="ct-run" disabled={!canRun} onClick={generate}>{t.generate} <span>→</span></button>
+              {!canRun && (<><p className="ct-muted">{t.noInput}</p><button className="ct-demo" onClick={() => { setCv(DEMO_CV); setJob(DEMO_JOB); }}>{t.tryDemo}</button></>)}
+            </div>
+          </section>
+        )}
+
+        {view === "loading" && (<section className="ct-loading"><div className="ct-scissors">✂</div><p className="ct-step">{t.steps[step]}</p><span className="ct-muted">{live ? t.poweredLive : t.poweredLocal}</span></section>)}
+        {view === "error" && (<section className="ct-error"><h2>{t.errorTitle}</h2><p>{t.errorBody}</p><button className="ct-run" onClick={reset}>{t.reset}</button></section>)}
+
+        {view === "result" && result && (
+          <section className="ct-fade">
+            <div className="ct-otabs">
+              <button className={outTab === "cv" ? "on" : ""} onClick={() => setOutTab("cv")}>{t.tabCv}</button>
+              <button className={outTab === "diff" ? "on" : ""} onClick={() => setOutTab("diff")}>{t.tabDiff}{result.changes?.length ? ` (${result.changes.length})` : ""}</button>
+            </div>
+
+            {outTab === "cv" ? (
+              <>
+                <div className="ct-card">
+                  <div className="ct-card-top">
+                    <span className="ct-eyebrow">{t.tabCv}</span>
+                    <div className="ct-dl">
+                      <button className="ct-copy" onClick={copyCv}>{copied ? t.copied : t.copy}</button>
+                      <button className="ct-copy" onClick={() => downloadText("CV-adaptat.md", result.tailored, "text/markdown")}>{t.dlMd}</button>
+                      <button className="ct-copy strong" disabled={dlBusy} onClick={doDocx}>{dlBusy ? "…" : t.dlDocx}</button>
+                    </div>
+                  </div>
+                  <pre className="ct-cv">{result.tailored}</pre>
+                </div>
+                <p className="ct-muted" style={{ textAlign: "left" }}>{t.docxNote}</p>
+              </>
+            ) : (
+              <>
+                {result.summaryNote && (
+                  <div className="ct-note-card"><span className="ct-eyebrow">{t.summary}</span><p>{result.summaryNote}</p></div>
+                )}
+                <div className="ct-changes">
+                  {(result.changes || []).map((c, i) => (
+                    <div key={i} className="ct-change">
+                      <div className="ct-change-head">
+                        <span className={`ct-ctag ${c.type}`}>{c.type === "added" ? t.added : t.changed}</span>
+                        <strong>{c.section}</strong>
+                      </div>
+                      {c.before ? (
+                        <div className="ct-diff">
+                          <div className="ct-diff-b"><small>{t.before}</small><p>{c.before}</p></div>
+                          <span className="ct-diff-arr">→</span>
+                          <div className="ct-diff-a"><small>{t.after}</small><p>{c.after}</p></div>
+                        </div>
+                      ) : (
+                        <div className="ct-diff-only"><small>{t.added}</small><p>{c.after}</p></div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {result.aligned?.length > 0 && (
+                  <div className="ct-note-card"><span className="ct-eyebrow">{t.kwAligned}</span><div className="ct-chips">{result.aligned.map((k, i) => <span key={i} className="ct-chip on">{k}</span>)}</div></div>
+                )}
+              </>
+            )}
+            <button className="ct-ghost" onClick={reset}>↺ {t.reset}</button>
+          </section>
+        )}
+      </main>
+
+      <div className={`ct-ov ${showHist ? "open" : ""}`} onClick={() => setShowHist(false)} />
+      <aside className={`ct-drawer ${showHist ? "open" : ""}`}>
+        <div className="ct-drawer-top"><span className="ct-eyebrow" style={{ margin: 0 }}>{t.history}</span><button className="ct-close" onClick={() => setShowHist(false)}>✕</button></div>
+        {hist_.length === 0 ? <p className="ct-muted">{t.historyEmpty}</p> : (
+          <>
+            <div className="ct-hist-list">
+              {hist_.map((h) => (
+                <div key={h.id} className="ct-hist-item">
+                  <span className="ct-hist-tag">{T[h.lang || lang]?.focuses?.[h.focus] || h.focus}</span>
+                  <p className="ct-hist-prev">{h.preview}</p>
+                  <span className="ct-hist-date">{new Date(h.ts).toLocaleDateString()}</span>
+                  <div className="ct-hist-act"><button onClick={() => openHistory(h)}>{t.open}</button><button className="del" onClick={() => deleteHistory(h.id)}>{t.del}</button></div>
+                </div>
+              ))}
+            </div>
+            <button className="ct-clear" onClick={clearHistory}>{t.clearAll}</button>
+            <p className="ct-muted" style={{ fontSize: ".72rem" }}>{t.savedNote}</p>
+          </>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;400;500;600&display=swap');
+.ct-root{--bg:#070d05;--panel:rgba(18,28,12,0.72);--line:rgba(170,255,100,0.16);--txt:#eef5e6;--mut:#94a882;--lm:#aaff64;--lm2:#7fd83a;position:relative;min-height:100vh;background:var(--bg);color:var(--txt);font-family:'Outfit',sans-serif;overflow-x:hidden;padding-bottom:80px;}
+.ct-root *{box-sizing:border-box;}
+.ct-grid{position:fixed;inset:0;background-image:linear-gradient(rgba(170,255,100,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(170,255,100,.03) 1px,transparent 1px);background-size:48px 48px;mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000,transparent);pointer-events:none;}
+.ct-glow{position:fixed;border-radius:50%;filter:blur(120px);pointer-events:none;}
+.ct-glow-a{width:520px;height:520px;background:#7fd83a;top:-180px;right:-120px;opacity:.22;}
+.ct-glow-b{width:460px;height:460px;background:#0fb6a0;bottom:-160px;left:-140px;opacity:.2;}
+.ct-header{position:relative;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:26px clamp(20px,5vw,64px);}
+.ct-brand{display:flex;gap:14px;align-items:center;}
+.ct-logo{font-size:1.7rem;color:var(--lm);filter:drop-shadow(0 0 10px var(--lm));}
+.ct-brand h1{margin:0;font-family:'Fraunces',serif;font-weight:900;font-size:1.45rem;letter-spacing:.04em;}
+.ct-brand p{margin:0;font-size:.78rem;color:var(--mut);}
+.ct-hr{display:flex;align-items:center;gap:12px;}
+.ct-pill{font-family:'JetBrains Mono',monospace;font-size:.66rem;letter-spacing:.1em;padding:5px 10px;border-radius:8px;border:1px solid var(--line);}
+.ct-pill.live{color:var(--lm);border-color:rgba(170,255,100,.4);}.ct-pill.local{color:var(--mut);}
+.ct-lang{background:transparent;border:1px solid var(--line);color:var(--lm);font-family:'JetBrains Mono',monospace;font-size:.8rem;padding:8px 14px;border-radius:10px;cursor:pointer;transition:.25s;}
+.ct-lang:hover{background:rgba(170,255,100,.08);}
+.ct-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;background:var(--lm);color:#142a05;border-radius:9px;font-size:.68rem;font-weight:700;}
+.ct-main{position:relative;z-index:2;max-width:780px;margin:0 auto;padding:0 clamp(20px,5vw,40px);}
+.ct-fade{animation:rise .5s ease both;}
+.ct-intro{font-size:clamp(1.05rem,2.4vw,1.3rem);line-height:1.5;max-width:600px;margin:24px 0 28px;font-weight:300;}
+.ct-intro::first-line{color:var(--lm);}
+.ct-panel{background:var(--panel);backdrop-filter:blur(16px);border:1px solid var(--line);border-radius:20px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.4);}
+.ct-tabs{display:flex;gap:6px;margin-bottom:16px;background:rgba(0,0,0,.3);padding:5px;border-radius:12px;width:fit-content;}
+.ct-tabs button{background:transparent;border:none;color:var(--mut);padding:8px 18px;border-radius:8px;cursor:pointer;font-family:'Outfit';font-size:.9rem;transition:.2s;}
+.ct-tabs button.on{background:rgba(170,255,100,.14);color:var(--lm);}
+.ct-ta{width:100%;background:rgba(0,0,0,.28);border:1px solid var(--line);border-radius:14px;color:var(--txt);padding:16px;font-family:'Outfit';font-size:.95rem;resize:vertical;line-height:1.5;}
+.ct-ta:focus{outline:none;border-color:var(--lm);}
+.ct-ta::placeholder{color:var(--mut);}
+.ct-upload{margin-top:10px;background:transparent;border:1px dashed var(--line);color:var(--lm);padding:9px 16px;border-radius:11px;cursor:pointer;font-family:'Outfit';font-size:.85rem;transition:.2s;}
+.ct-upload:hover{background:rgba(170,255,100,.06);}
+.ct-opt-lbl{display:block;font-family:'JetBrains Mono',monospace;font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin-bottom:9px;}
+.ct-chips{display:flex;flex-wrap:wrap;gap:7px;}
+.ct-chip{background:rgba(0,0,0,.25);border:1px solid var(--line);color:var(--mut);padding:6px 13px;border-radius:9px;cursor:pointer;font-family:'Outfit';font-size:.82rem;transition:.2s;}
+.ct-chip.on{background:rgba(170,255,100,.14);color:var(--lm);border-color:rgba(170,255,100,.4);}
+.ct-run{width:100%;margin-top:20px;background:linear-gradient(95deg,var(--lm),var(--lm2));color:#142a05;border:none;padding:16px;border-radius:14px;font-family:'Outfit';font-weight:600;font-size:1.02rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:.25s;}
+.ct-run:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 12px 30px rgba(170,255,100,.3);}
+.ct-run:disabled{opacity:.35;cursor:not-allowed;}
+.ct-run:hover:not(:disabled) span{transform:translateX(4px);}
+.ct-muted{text-align:center;color:var(--mut);font-size:.82rem;margin:10px 0 0;}
+.ct-demo{display:block;margin:12px auto 0;background:transparent;border:1px dashed var(--line);color:var(--lm);padding:9px 18px;border-radius:11px;cursor:pointer;font-family:'Outfit';font-size:.85rem;}
+.ct-demo:hover{background:rgba(170,255,100,.06);}
+.ct-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:48vh;gap:22px;animation:rise .4s ease both;}
+.ct-scissors{font-size:3rem;color:var(--lm);filter:drop-shadow(0 0 14px var(--lm));animation:snip 1.2s ease-in-out infinite;}
+.ct-step{font-family:'JetBrains Mono',monospace;color:var(--lm);font-size:.92rem;}
+.ct-error{text-align:center;padding:60px 20px;}
+.ct-error h2{font-family:'Fraunces',serif;color:var(--lm2);}
+.ct-error p{color:var(--mut);margin-bottom:24px;}
+.ct-otabs{display:flex;gap:6px;margin:14px 0 16px;background:rgba(0,0,0,.3);padding:5px;border-radius:12px;width:fit-content;}
+.ct-otabs button{background:transparent;border:none;color:var(--mut);padding:9px 20px;border-radius:8px;cursor:pointer;font-family:'Outfit';font-size:.9rem;transition:.2s;}
+.ct-otabs button.on{background:rgba(170,255,100,.14);color:var(--lm);}
+.ct-card{background:var(--panel);backdrop-filter:blur(16px);border:1px solid var(--line);border-radius:18px;padding:22px;animation:rise .4s ease both;}
+.ct-card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px;flex-wrap:wrap;}
+.ct-eyebrow{display:block;font-family:'JetBrains Mono',monospace;font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;color:var(--mut);}
+.ct-dl{display:flex;gap:8px;flex-wrap:wrap;}
+.ct-copy{background:rgba(170,255,100,.1);border:1px solid rgba(170,255,100,.3);color:var(--lm);padding:7px 13px;border-radius:10px;cursor:pointer;font-family:'Outfit';font-size:.8rem;transition:.2s;}
+.ct-copy:hover{background:rgba(170,255,100,.2);}
+.ct-copy.strong{background:var(--lm);color:#142a05;font-weight:600;}
+.ct-copy:disabled{opacity:.5;cursor:wait;}
+.ct-cv{white-space:pre-wrap;font-family:'Outfit';font-size:.92rem;line-height:1.65;color:var(--txt);margin:0;max-height:560px;overflow-y:auto;}
+.ct-note-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:14px;}
+.ct-note-card p{margin:0;color:var(--txt);font-size:.92rem;line-height:1.55;}
+.ct-note-card .ct-eyebrow{margin-bottom:10px;}
+.ct-changes{display:flex;flex-direction:column;gap:14px;margin-bottom:14px;}
+.ct-change{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;}
+.ct-change-head{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.ct-ctag{font-family:'JetBrains Mono',monospace;font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;padding:3px 9px;border-radius:7px;}
+.ct-ctag.added{background:rgba(170,255,100,.12);color:var(--lm);}
+.ct-ctag.changed{background:rgba(122,240,255,.12);color:#7af0ff;}
+.ct-change-head strong{font-size:.98rem;}
+.ct-diff{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;}
+.ct-diff-b small,.ct-diff-a small,.ct-diff-only small{font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:5px;}
+.ct-diff-b small{color:#ff6b9d;}.ct-diff-a small{color:var(--lm);}.ct-diff-only small{color:var(--lm);}
+.ct-diff-b p{color:var(--mut);font-size:.86rem;line-height:1.4;margin:0;text-decoration:line-through;text-decoration-color:rgba(255,107,157,.4);}
+.ct-diff-a p,.ct-diff-only p{color:var(--txt);font-size:.88rem;line-height:1.5;margin:0;}
+.ct-diff-arr{color:var(--lm);font-size:1.2rem;}
+.ct-ghost{width:100%;background:transparent;border:1px solid var(--line);color:var(--mut);padding:13px;border-radius:12px;cursor:pointer;font-family:'Outfit';transition:.2s;margin-top:6px;}
+.ct-ghost:hover{border-color:var(--lm);color:var(--lm);}
+.ct-ov{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(2px);opacity:0;pointer-events:none;transition:.3s;z-index:9;}
+.ct-ov.open{opacity:1;pointer-events:auto;}
+.ct-drawer{position:fixed;top:0;right:0;height:100%;width:min(380px,90vw);background:#0a1206;border-left:1px solid var(--line);box-shadow:-20px 0 60px rgba(0,0,0,.5);transform:translateX(100%);transition:transform .32s cubic-bezier(.2,.8,.2,1);z-index:10;padding:24px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;}
+.ct-drawer.open{transform:translateX(0);}
+.ct-drawer-top{display:flex;justify-content:space-between;align-items:center;}
+.ct-close{background:transparent;border:1px solid var(--line);color:var(--mut);width:32px;height:32px;border-radius:9px;cursor:pointer;}
+.ct-close:hover{color:var(--lm);border-color:var(--lm);}
+.ct-hist-list{display:flex;flex-direction:column;gap:12px;}
+.ct-hist-item{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;}
+.ct-hist-tag{font-family:'JetBrains Mono',monospace;font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:7px;background:rgba(170,255,100,.1);color:var(--lm);}
+.ct-hist-prev{font-size:.84rem;color:var(--txt);line-height:1.4;margin:8px 0 6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.ct-hist-date{font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--mut);}
+.ct-hist-act{display:flex;gap:8px;margin-top:10px;}
+.ct-hist-act button{flex:1;background:rgba(170,255,100,.08);border:1px solid var(--line);color:var(--lm);padding:7px;border-radius:9px;cursor:pointer;font-family:'Outfit';font-size:.8rem;}
+.ct-hist-act button.del{background:transparent;color:#ff8a8a;border-color:rgba(255,138,138,.3);}
+.ct-clear{background:transparent;border:1px solid rgba(255,138,138,.3);color:#ff8a8a;padding:10px;border-radius:11px;cursor:pointer;font-family:'Outfit';font-size:.85rem;}
+@keyframes snip{0%,100%{transform:rotate(-8deg);}50%{transform:rotate(8deg);}}
+@keyframes rise{from{opacity:0;transform:translateY(16px);}to{opacity:1;transform:none;}}
+@media(max-width:600px){.ct-diff{grid-template-columns:1fr;}.ct-diff-arr{transform:rotate(90deg);justify-self:start;}}
+`;
