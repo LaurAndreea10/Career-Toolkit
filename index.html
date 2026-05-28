@@ -15,7 +15,7 @@
   :root{
     --bg:#06070d;--panel:rgba(16,18,26,0.7);--line:rgba(255,255,255,0.1);
     --txt:#e8eef5;--mut:#8b97a8;
-    --cv:#7af0ff;--cover:#ffd166;--bio:#36f1cd;--counter:#ff6b9d;--proof:#8d8dff;
+    --cv:#7af0ff;--cover:#ffd166;--bio:#36f1cd;--counter:#ff6b9d;--proof:#8d8dff;--tailor:#aaff64;--ats:#ff5a5a;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   html{scroll-behavior:smooth;}
@@ -60,6 +60,8 @@
   .app.bio{--accent:var(--bio);}
   .app.counter{--accent:var(--counter);}
   .app.proof{--accent:var(--proof);}
+  .app.tailor{--accent:var(--tailor);}
+  .app.ats{--accent:var(--ats);}
 
   .how{padding:50px 0;border-top:1px solid rgba(255,255,255,.06);}
   .how h3{font-family:'Fraunces',serif;font-size:clamp(1.6rem,4vw,2.2rem);text-align:center;margin-bottom:36px;}
@@ -145,6 +147,22 @@
       <span class="role">Proof</span>
       <h3><span class="ro">Reviewer proiecte</span><span class="en">Project Reviewer</span></h3>
       <p><span class="ro">Scor, feedback structurat și o descriere îmbunătățită pentru portofoliu.</span><span class="en">A score, structured feedback, and an improved portfolio description.</span></p>
+      <span class="go"><span class="ro">Deschide</span><span class="en">Open</span> →</span>
+    </a>
+
+    <a class="app tailor reveal" href="./cv-tailor/">
+      <span class="ic">✂</span>
+      <span class="role">CV Tailor</span>
+      <h3><span class="ro">Adaptare CV</span><span class="en">CV Tailoring</span></h3>
+      <p><span class="ro">Rescrie CV-ul pentru un anunț anume, arată ce s-a schimbat și exportă .docx.</span><span class="en">Rewrites your CV for a specific job, shows what changed, and exports .docx.</span></p>
+      <span class="go"><span class="ro">Deschide</span><span class="en">Open</span> →</span>
+    </a>
+
+    <a class="app ats reveal" href="./ats-gate/">
+      <span class="ic">⊟</span>
+      <span class="role">ATS Gate</span>
+      <h3><span class="ro">Filtru ATS</span><span class="en">ATS Checker</span></h3>
+      <p><span class="ro">Vezi cum „citește” un sistem ATS CV-ul tău: parsabilitate, structură, cuvinte-cheie.</span><span class="en">See how an ATS "reads" your CV: parseability, structure, keywords.</span></p>
       <span class="go"><span class="ro">Deschide</span><span class="en">Open</span> →</span>
     </a>
 
