@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ro" data-lang="ro">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CV SCOUT — Case Study</title>
+<meta name="description" content="CV SCOUT — AI CV evaluator & interview simulator. Case study: zero-cost dual-mode AI, in-browser PDF, bilingual RO/EN." />
+<!-- Open Graph -->
+<meta property="og:title" content="CV SCOUT — AI CV Evaluator · Case Study" />
+<meta property="og:description" content="Zero-cost dual-mode AI, in-browser PDF parsing, bilingual RO/EN. A front-end case study." />
+<meta property="og:type" content="website" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#070a0f; --panel:rgba(18,24,33,0.72); --line:rgba(122,240,255,0.14);
+    --txt:#e8eef5; --mut:#8b97a8; --neon:#7af0ff; --mint:#36f1cd; --pink:#ff6b9d; --gold:#ffd166;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  body{background:var(--bg);color:var(--txt);font-family:'Outfit',sans-serif;line-height:1.6;overflow-x:hidden;position:relative;}
+
+  /* atmosphere */
+  .grid-bg{position:fixed;inset:0;background-image:linear-gradient(rgba(122,240,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(122,240,255,.035) 1px,transparent 1px);background-size:48px 48px;mask-image:radial-gradient(ellipse 80% 50% at 50% 0%,#000,transparent);pointer-events:none;z-index:0;}
+  .glow{position:fixed;border-radius:50%;filter:blur(130px);pointer-events:none;z-index:0;}
+  .glow-a{width:560px;height:560px;background:#1b6cff;top:-200px;right:-140px;opacity:.4;}
+  .glow-b{width:480px;height:480px;background:#0fb6a0;bottom:-180px;left:-160px;opacity:.3;}
+
+  .wrap{position:relative;z-index:1;max-width:920px;margin:0 auto;padding:0 clamp(20px,5vw,40px);}
+
+  /* nav */
+  nav{position:relative;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:26px clamp(20px,5vw,40px);max-width:920px;margin:0 auto;}
+  .brand{display:flex;gap:13px;align-items:center;}
+  .logo{font-size:1.7rem;color:var(--neon);filter:drop-shadow(0 0 10px var(--neon));}
+  .brand h1{font-family:'Fraunces',serif;font-weight:900;font-size:1.4rem;letter-spacing:.04em;}
+  .lang{background:transparent;border:1px solid var(--line);color:var(--neon);font-family:'JetBrains Mono',monospace;font-size:.8rem;padding:8px 14px;border-radius:10px;cursor:pointer;transition:.25s;}
+  .lang:hover{background:rgba(122,240,255,.08);border-color:var(--neon);}
+
+  /* hero */
+  header.hero{padding:60px 0 50px;text-align:center;}
+  .eyebrow{font-family:'JetBrains Mono',monospace;font-size:.74rem;letter-spacing:.2em;text-transform:uppercase;color:var(--mut);margin-bottom:18px;}
+  .hero h2{font-family:'Fraunces',serif;font-weight:900;font-size:clamp(2.4rem,7vw,4.2rem);line-height:1.05;margin-bottom:22px;}
+  .hero h2 .accent{background:linear-gradient(95deg,var(--neon),var(--mint));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+  .hero p{font-size:clamp(1.05rem,2.2vw,1.3rem);color:var(--mut);max-width:620px;margin:0 auto 32px;font-weight:300;}
+  .cta-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;}
+  .btn{padding:14px 26px;border-radius:13px;font-family:'Outfit';font-weight:600;font-size:.98rem;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:9px;transition:.25s;border:1px solid var(--line);}
+  .btn-primary{background:linear-gradient(95deg,var(--neon),var(--mint));color:#04181c;border:none;}
+  .btn-primary:hover{transform:translateY(-2px);box-shadow:0 12px 30px rgba(122,240,255,.3);}
+  .btn-ghost{background:transparent;color:var(--neon);}
+  .btn-ghost:hover{background:rgba(122,240,255,.08);border-color:var(--neon);}
+
+  /* stat strip */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:16px;overflow:hidden;margin:20px 0 60px;}
+  .stat{background:#0b0f16;padding:22px 16px;text-align:center;}
+  .stat b{display:block;font-family:'JetBrains Mono',monospace;font-size:1.7rem;color:var(--neon);}
+  .stat span{font-size:.78rem;color:var(--mut);}
+
+  section{padding:46px 0;border-top:1px solid rgba(255,255,255,.05);}
+  .sec-label{font-family:'JetBrains Mono',monospace;font-size:.74rem;letter-spacing:.18em;text-transform:uppercase;color:var(--mint);margin-bottom:14px;}
+  section h3{font-family:'Fraunces',serif;font-size:clamp(1.7rem,4vw,2.4rem);font-weight:600;margin-bottom:24px;}
+  section > .wrap > p, .lead{color:var(--mut);font-size:1.05rem;max-width:660px;margin-bottom:20px;}
+
+  /* PDR cards */
+  .pdr{display:flex;flex-direction:column;gap:18px;}
+  .card{background:var(--panel);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:18px;padding:26px;transition:.3s;}
+  .card:hover{border-color:rgba(122,240,255,.3);transform:translateY(-2px);}
+  .card .num{font-family:'JetBrains Mono',monospace;font-size:.8rem;color:var(--neon);letter-spacing:.1em;}
+  .card h4{font-family:'Fraunces',serif;font-size:1.35rem;font-weight:600;margin:8px 0 18px;}
+  .pdr-row{display:grid;grid-template-columns:auto 1fr;gap:12px 16px;align-items:start;}
+  .tag{font-family:'JetBrains Mono',monospace;font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;padding:4px 10px;border-radius:7px;white-space:nowrap;height:fit-content;}
+  .tag.p{background:rgba(255,107,157,.1);color:var(--pink);border:1px solid rgba(255,107,157,.25);}
+  .tag.d{background:rgba(122,240,255,.1);color:var(--neon);border:1px solid rgba(122,240,255,.25);}
+  .tag.r{background:rgba(54,241,205,.1);color:var(--mint);border:1px solid rgba(54,241,205,.25);}
+  .pdr-row p{font-size:.94rem;color:var(--txt);}
+
+  /* feature grid */
+  .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;}
+  .feat{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px;}
+  .feat .ic{font-size:1.6rem;margin-bottom:12px;display:block;}
+  .feat h5{font-size:1.05rem;margin-bottom:8px;}
+  .feat p{font-size:.88rem;color:var(--mut);}
+
+  /* timeline */
+  .timeline{display:flex;flex-direction:column;gap:0;border-left:2px solid var(--line);padding-left:26px;margin-left:8px;}
+  .tl{position:relative;padding:0 0 28px;}
+  .tl::before{content:"";position:absolute;left:-33px;top:4px;width:12px;height:12px;border-radius:50%;background:var(--neon);box-shadow:0 0 10px var(--neon);}
+  .tl b{display:block;font-size:1rem;margin-bottom:4px;}
+  .tl span{font-size:.88rem;color:var(--mut);}
+
+  /* stack chips */
+  .chips{display:flex;flex-wrap:wrap;gap:8px;}
+  .chip{font-family:'JetBrains Mono',monospace;font-size:.8rem;padding:6px 13px;border-radius:9px;background:rgba(122,240,255,.06);border:1px solid var(--line);color:var(--neon);}
+
+  footer{padding:50px 0 70px;text-align:center;border-top:1px solid rgba(255,255,255,.05);}
+  footer p{color:var(--mut);font-size:.88rem;}
+  footer a{color:var(--neon);text-decoration:none;}
+
+  /* language visibility */
+  [data-lang="ro"] .en{display:none;}
+  [data-lang="en"] .ro{display:none;}
+
+  .reveal{opacity:0;transform:translateY(20px);transition:opacity .6s ease,transform .6s ease;}
+  .reveal.in{opacity:1;transform:none;}
+
+  @media(max-width:600px){
+    .stats{grid-template-columns:repeat(2,1fr);}
+    .pdr-row{grid-template-columns:1fr;gap:8px;}
+  }
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="glow glow-a"></div>
+<div class="glow glow-b"></div>
+
+<nav>
+  <div class="brand"><span class="logo">◈</span><h1>CV SCOUT</h1></div>
+  <button class="lang" id="langBtn">EN</button>
+</nav>
+
+<div class="wrap">
+  <header class="hero">
+    <p class="eyebrow">Case Study · 2026</p>
+    <h2>
+      <span class="ro">Evaluator de CV<br>cu <span class="accent">inteligență artificială</span></span>
+      <span class="en">AI-powered<br><span class="accent">CV evaluator</span></span>
+    </h2>
+    <p>
+      <span class="ro">O aplicație single-file React care evaluează CV-uri, le compară cu anunțuri de job și rulează interviuri adaptive — funcțională oriunde, cu cost zero.</span>
+      <span class="en">A single-file React app that evaluates CVs, compares them to job posts, and runs adaptive interviews — working anywhere, at zero cost.</span>
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="./cv-scout/" target="_blank" rel="noopener">
+        <span class="ro">Vezi demo live</span><span class="en">View live demo</span> →
+      </a>
+      <a class="btn btn-ghost" href="./index.html">
+        <span class="ro">Toate uneltele</span><span class="en">All tools</span>
+      </a>
+    </div>
+  </header>
+
+  <div class="stats reveal">
+    <div class="stat"><b>0€</b><span class="ro">cost de rulare</span><span class="en">running cost</span></div>
+    <div class="stat"><b>3</b><span class="ro">tipuri de input</span><span class="en">input types</span></div>
+    <div class="stat"><b>5</b><span class="ro">categorii scor</span><span class="en">score categories</span></div>
+    <div class="stat"><b>RO/EN</b><span class="ro">bilingv</span><span class="en">bilingual</span></div>
+  </div>
+
+  <section class="reveal">
+    <p class="sec-label"><span class="ro">Provocarea</span><span class="en">The challenge</span></p>
+    <h3><span class="ro">AI real, fără server și fără cost</span><span class="en">Real AI, no server, no cost</span></h3>
+    <p class="lead">
+      <span class="ro">Un evaluator de CV credibil are nevoie de inteligență reală, nu de reguli fixe. Dar portofoliul trăiește pe GitHub Pages — fără backend, fără chei sigure. Cum livrezi AI autentic fără a expune o cheie API sau a genera costuri pentru oricine deschide link-ul?</span>
+      <span class="en">A credible CV evaluator needs real intelligence, not fixed rules. But the portfolio lives on GitHub Pages — no backend, no safe place for keys. How do you ship genuine AI without exposing an API key or billing anyone who opens the link?</span>
+    </p>
+  </section>
+
+  <section>
+    <div class="wrap" style="padding:0;">
+      <p class="sec-label reveal"><span class="ro">Decizii tehnice</span><span class="en">Technical decisions</span></p>
+      <h3 class="reveal">Problemă → Decizie → Rezultat</h3>
+      <div class="pdr">
+
+        <div class="card reveal">
+          <span class="num">01</span>
+          <h4><span class="ro">Cost zero, oriunde</span><span class="en">Zero cost, anywhere</span></h4>
+          <div class="pdr-row">
+            <span class="tag p"><span class="ro">Problemă</span><span class="en">Problem</span></span>
+            <p><span class="ro">Un apel API expus pe Pages = cheie publică și costuri reale pentru oricine.</span><span class="en">An API call exposed on Pages = a public key and real costs for anyone.</span></p>
+            <span class="tag d"><span class="ro">Decizie</span><span class="en">Decision</span></span>
+            <p><span class="ro">Detectare automată a mediului: API real în Claude.ai, motor local euristic oriunde altundeva. Nicio cheie în cod.</span><span class="en">Automatic environment detection: real API inside Claude.ai, a local heuristic engine everywhere else. No key in the code.</span></p>
+            <span class="tag r"><span class="ro">Rezultat</span><span class="en">Result</span></span>
+            <p><span class="ro">Demo complet funcțional pe Pages — fără card, fără cheie, fără factură.</span><span class="en">A fully working demo on Pages — no card, no key, no invoice.</span></p>
+          </div>
+        </div>
+
+        <div class="card reveal">
+          <span class="num">02</span>
+          <h4><span class="ro">PDF citit în browser</span><span class="en">PDF read in-browser</span></h4>
+          <div class="pdr-row">
+            <span class="tag p"><span class="ro">Problemă</span><span class="en">Problem</span></span>
+            <p><span class="ro">Extragerea textului dintr-un PDF cere de obicei un backend.</span><span class="en">Extracting PDF text usually requires a backend.</span></p>
+            <span class="tag d"><span class="ro">Decizie</span><span class="en">Decision</span></span>
+            <p><span class="ro">pdf.js încărcat la cerere de la CDN, extrage textul direct în browser.</span><span class="en">pdf.js loaded on demand from a CDN, extracting text directly in the browser.</span></p>
+            <span class="tag r"><span class="ro">Rezultat</span><span class="en">Result</span></span>
+            <p><span class="ro">PDF-uri reale, analizate local, gratuit. Cele scanate sunt detectate și utilizatorul e ghidat.</span><span class="en">Real PDFs analyzed locally, for free. Scanned ones are detected and the user is guided.</span></p>
+          </div>
+        </div>
+
+        <div class="card reveal">
+          <span class="num">03</span>
+          <h4><span class="ro">Comutare RO/EN fără regenerare</span><span class="en">RO/EN switching without regeneration</span></h4>
+          <div class="pdr-row">
+            <span class="tag p"><span class="ro">Problemă</span><span class="en">Problem</span></span>
+            <p><span class="ro">Întrebările generate o singură dată rămâneau în limba inițială.</span><span class="en">Questions generated once stayed in their original language.</span></p>
+            <span class="tag d"><span class="ro">Decizie</span><span class="en">Decision</span></span>
+            <p><span class="ro">Fiecare întrebare e un descriptor independent de limbă; textul se derivă din limba curentă.</span><span class="en">Each question is a language-independent descriptor; the text is derived from the current language.</span></p>
+            <span class="tag r"><span class="ro">Rezultat</span><span class="en">Result</span></span>
+            <p><span class="ro">Toggle-ul re-traduce instant întrebări, istoric și feedback, fără apeluri în plus.</span><span class="en">The toggle instantly re-translates questions, history and feedback, with no extra calls.</span></p>
+          </div>
+        </div>
+
+        <div class="card reveal">
+          <span class="num">04</span>
+          <h4><span class="ro">Istoric persistent cross-environment</span><span class="en">Cross-environment persistent history</span></h4>
+          <div class="pdr-row">
+            <span class="tag p"><span class="ro">Problemă</span><span class="en">Problem</span></span>
+            <p><span class="ro">localStorage e blocat în artifacts; window.storage nu există pe Pages.</span><span class="en">localStorage is blocked in artifacts; window.storage doesn't exist on Pages.</span></p>
+            <span class="tag d"><span class="ro">Decizie</span><span class="en">Decision</span></span>
+            <p><span class="ro">Un strat de stocare care alege automat window.storage → localStorage → memorie.</span><span class="en">A storage layer that auto-picks window.storage → localStorage → in-memory.</span></p>
+            <span class="tag r"><span class="ro">Rezultat</span><span class="en">Result</span></span>
+            <p><span class="ro">Istoricul persistă în orice mediu, fără server.</span><span class="en">History persists in any environment, with no server.</span></p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap" style="padding:0;">
+      <p class="sec-label reveal"><span class="ro">Ce face</span><span class="en">What it does</span></p>
+      <h3 class="reveal"><span class="ro">Funcționalități</span><span class="en">Features</span></h3>
+      <div class="features">
+        <div class="feat reveal"><span class="ic">📄</span><h5><span class="ro">Input triplu</span><span class="en">Triple input</span></h5><p><span class="ro">PDF, imagine sau text lipit.</span><span class="en">PDF, image, or pasted text.</span></p></div>
+        <div class="feat reveal"><span class="ic">📊</span><h5><span class="ro">Scoruri pe categorii</span><span class="en">Category scores</span></h5><p><span class="ro">Impact, claritate, ATS, structură, relevanță.</span><span class="en">Impact, clarity, ATS, structure, relevance.</span></p></div>
+        <div class="feat reveal"><span class="ic">🎯</span><h5><span class="ro">Potrivire cu jobul</span><span class="en">Job match</span></h5><p><span class="ro">Cuvinte-cheie găsite și lipsă față de un anunț.</span><span class="en">Matched and missing keywords vs a job post.</span></p></div>
+        <div class="feat reveal"><span class="ic">✍️</span><h5><span class="ro">Rescrieri</span><span class="en">Rewrites</span></h5><p><span class="ro">Sugestii concrete în format Înainte → După.</span><span class="en">Concrete Before → After suggestions.</span></p></div>
+        <div class="feat reveal"><span class="ic">🎤</span><h5><span class="ro">Interviu adaptiv</span><span class="en">Adaptive interview</span></h5><p><span class="ro">5 întrebări care se adaptează, cu răspunsuri model.</span><span class="en">5 adapting questions, with model answers.</span></p></div>
+        <div class="feat reveal"><span class="ic">🗂️</span><h5><span class="ro">Istoric salvat</span><span class="en">Saved history</span></h5><p><span class="ro">Redeschizi evaluări și interviuri vechi.</span><span class="en">Reopen past evaluations and interviews.</span></p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap" style="padding:0;">
+      <p class="sec-label reveal"><span class="ro">Cum a evoluat</span><span class="en">How it evolved</span></p>
+      <h3 class="reveal"><span class="ro">Iterații</span><span class="en">Iterations</span></h3>
+      <div class="timeline">
+        <div class="tl reveal"><b><span class="ro">v1 · Evaluator de bază</span><span class="en">v1 · Core evaluator</span></b><span class="ro">Upload, scoruri pe categorii, feedback pe secțiuni, rescrieri — prin AI real.</span><span class="en">Upload, category scores, section feedback, rewrites — via real AI.</span></div>
+        <div class="tl reveal"><b><span class="ro">v2 · Cost zero + interviu</span><span class="en">v2 · Zero cost + interview</span></b><span class="ro">Dual-mode local/live și simulare de interviu adaptivă.</span><span class="en">Dual-mode local/live and an adaptive interview simulation.</span></div>
+        <div class="tl reveal"><b><span class="ro">v3 · PDF în browser</span><span class="en">v3 · In-browser PDF</span></b><span class="ro">Extragere text cu pdf.js, fără server.</span><span class="en">pdf.js text extraction, no server.</span></div>
+        <div class="tl reveal"><b><span class="ro">v4 · Istoric + răspunsuri sugerate</span><span class="en">v4 · History + suggested answers</span></b><span class="ro">Stocare persistentă cross-environment și răspunsuri model în interviu.</span><span class="en">Cross-environment persistent storage and model answers in the interview.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap" style="padding:0;">
+      <p class="sec-label reveal"><span class="ro">Construit cu</span><span class="en">Built with</span></p>
+      <h3 class="reveal">Stack</h3>
+      <div class="chips reveal">
+        <span class="chip">React</span><span class="chip">pdf.js</span><span class="chip">CSS (no libs)</span>
+        <span class="chip">Anthropic API</span><span class="chip">single-file</span><span class="chip">GitHub Pages</span><span class="chip">RO/EN</span>
+      </div>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <div class="wrap">
+    <p>
+      <span class="ro">Construit de</span><span class="en">Built by</span>
+      <a href="https://github.com/LaurAndreea10" target="_blank" rel="noopener">LaurAndreea10</a> ·
+      <a href="https://laurandreea10.github.io/" target="_blank" rel="noopener">Portfolio</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+  // language toggle (data-lang convention)
+  const html = document.documentElement;
+  const btn = document.getElementById('langBtn');
+  btn.addEventListener('click', () => {
+    const next = html.getAttribute('data-lang') === 'ro' ? 'en' : 'ro';
+    html.setAttribute('data-lang', next);
+    html.setAttribute('lang', next);
+    btn.textContent = next === 'ro' ? 'EN' : 'RO';
+  });
+
+  // scroll reveal
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+</script>
+</body>
+</html>
